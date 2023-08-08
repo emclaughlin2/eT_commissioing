@@ -1,0 +1,165 @@
+#include "allcalos.h"
+
+#include <fun4all/Fun4AllReturnCodes.h>
+#include <fun4all/PHTFileServer.h>
+
+#include <phool/getClass.h>
+#include <phool/PHCompositeNode.h>
+
+#include <calobase/TowerInfoContainer.h>
+#include <calobase/TowerInfo.h>
+
+
+#include <TFile.h>
+#include <TH3F.h>
+
+#include <cassert>
+//____________________________________________________________________________..
+allcalos::allcalos(const std::string &name):
+ SubsysReco(name)
+{
+  std::cout << "allcalos::allcalos(const std::string &name) Calling ctor" << std::endl;
+}
+
+//____________________________________________________________________________..
+allcalos::~allcalos()
+{
+  std::cout << "allcalos::~allcalos() Calling dtor" << std::endl;
+}
+
+//____________________________________________________________________________..
+int allcalos::Init(PHCompositeNode *topNode)
+{
+  std::cout << "allcalos::Init(PHCompositeNode *topNode) Initializing" << std::endl;
+  PHTFileServer::get().open(m_outputFileName, "RECREATE");
+  h_calo_correlation = new TH3F("h_calo_correlation","",100,0,1.1,100,0,1.1,100,0,1.1);
+  h_calo_correlation->GetXaxis()->SetTitle("EMCal total ADC/Max EMCal");
+  h_calo_correlation->GetYaxis()->SetTitle("Inner HCal total ADC/Max IHCal");
+  h_calo_correlation->GetZaxis()->SetTitle("Outer HCal total ADC/Max OHCal");
+
+  h_total_calo = new TH1F("h_total_calo","",100,0,30000000);
+  
+  h_single_channel = new TH1F("h_single_channel","",100,0,10000);
+
+  h_tower_correlation = new TH3F("h_tower_correlation","",100,0,1.1,100,0,1.1,100,0,1.1);
+
+  maxem = 0;
+  maxih = 0;
+  maxoh = 0;
+  return Fun4AllReturnCodes::EVENT_OK;
+}
+
+//____________________________________________________________________________..
+int allcalos::InitRun(PHCompositeNode *topNode)
+{
+  std::cout << "allcalos::InitRun(PHCompositeNode *topNode) Initializing for Run XXX" << std::endl;
+  return Fun4AllReturnCodes::EVENT_OK;
+}
+
+//____________________________________________________________________________..
+int allcalos::process_event(PHCompositeNode *topNode)
+{
+  //std::cout << "allcalos::process_event(PHCompositeNode *topNode) Processing Event" << std::endl;
+  TowerInfoContainer *towerinfosEM3 = findNode::getClass<TowerInfoContainer>(topNode, "TOWERS_CEMC");
+  TowerInfoContainer *towerinfosIH3 = findNode::getClass<TowerInfoContainer>(topNode, "TOWERS_HCALIN");
+  TowerInfoContainer *towerinfosOH3 = findNode::getClass<TowerInfoContainer>(topNode, "TOWERS_HCALOUT");
+  if (!towerinfosEM3 || !towerinfosIH3 || !towerinfosOH3)
+    {
+      std::cout <<  PHWHERE << "missing tower info object, doing nothing" << std::endl;
+      return Fun4AllReturnCodes::ABORTRUN;
+    }
+  float totalem = 0;
+  float totalih = 0;
+  float totaloh = 0;
+
+  //float emtowers[64][24];
+  //float ohtowers[24][64];
+  //float ihtowers[24][64];
+
+  unsigned int nchannels_em = towerinfosEM3->size();
+  for (unsigned int channel = 0; channel < nchannels_em;channel++)
+    {
+      /*unsigned int towerkey = towerinfosEM3->encode_key(channel);
+      int ieta = towerinfosEM3->getTowerEtaBin(towerkey);
+      int iphi = towerinfosEM3->getTowerPhiBin(towerkey);*/
+      float this_E = towerinfosEM3->get_tower_at_channel(channel)->get_energy();
+      totalem += this_E;
+      h_single_channel->Fill(this_E);
+      //if(this_E > maxem) maxem = this_E;
+    }
+  unsigned int nchannels_ih = towerinfosIH3->size();
+  for (unsigned int channel = 0; channel < nchannels_ih;channel++)
+    {
+      unsigned int towerkey = towerinfosIH3->encode_key(channel);
+      int ieta = towerinfosIH3->getTowerEtaBin(towerkey);
+      int iphi = towerinfosIH3->getTowerPhiBin(towerkey);
+      float this_E = towerinfosIH3->get_tower_at_channel(channel)->get_energy();
+      totalih += this_E;
+      //ihtowers[ieta][iphi] = this_E;
+      //if(this_E > maxih) maxih = this_E;
+    }
+  unsigned int nchannels_oh = towerinfosOH3->size();
+  for (unsigned int channel = 0; channel < nchannels_oh;channel++)
+    {
+      unsigned int towerkey = towerinfosOH3->encode_key(channel);
+      int ieta = towerinfosOH3->getTowerEtaBin(towerkey);
+      int iphi = towerinfosOH3->getTowerPhiBin(towerkey);
+      float this_E = towerinfosOH3->get_tower_at_channel(channel)->get_energy();
+      totaloh += this_E;
+      //ohtowers[ieta][iphi] = this_E;
+      //if(this_E > maxoh) maxoh = this_E;
+    }
+  assert(h_calo_correlation);
+  if(totalem > maxem) maxem = totalem;
+  if(totalih > maxih) maxih = totalih;
+  if(totaloh > maxoh) maxoh = totaloh;
+  h_calo_correlation->Fill(totalem/1.00949e+07, totalih/304043, totaloh/125324);
+  h_total_calo->Fill(totalem+totalih+totaloh);
+
+  /*for(int ieta = 0; ieta < 24; ieta++){
+    for(int iphi = 0; iphi < 64; iphi++){
+      h_tower_correlation->Fill(0.,ihtowers[ieta][iphi]/5.83191,ohtowers[ieta][iphi]/16.8573);
+    }
+    }*/
+  return Fun4AllReturnCodes::EVENT_OK;
+}
+
+//____________________________________________________________________________..
+int allcalos::ResetEvent(PHCompositeNode *topNode)
+{
+  //std::cout << "allcalos::ResetEvent(PHCompositeNode *topNode) Resetting internal structures, prepare for next event" << std::endl;
+  return Fun4AllReturnCodes::EVENT_OK;
+}
+
+//____________________________________________________________________________..
+int allcalos::EndRun(const int runnumber)
+{
+  std::cout << "allcalos::EndRun(const int runnumber) Ending Run for Run " << runnumber << std::endl;
+  return Fun4AllReturnCodes::EVENT_OK;
+}
+
+//____________________________________________________________________________..
+int allcalos::End(PHCompositeNode *topNode)
+{
+  std::cout << "allcalos::End(PHCompositeNode *topNode) This is the End..." << std::endl;
+  PHTFileServer::get().cd(m_outputFileName);
+  h_calo_correlation->Write();
+  h_single_channel->Write();
+  h_total_calo->Write();
+  h_tower_correlation->Write();
+  std::cout<<"Calos have max energy "<< maxem <<" "<<maxih<<" "<<maxoh<<std::endl;
+  return Fun4AllReturnCodes::EVENT_OK;
+}
+
+//____________________________________________________________________________..
+int allcalos::Reset(PHCompositeNode *topNode)
+{
+ std::cout << "allcalos::Reset(PHCompositeNode *topNode) being Reset" << std::endl;
+  return Fun4AllReturnCodes::EVENT_OK;
+}
+
+//____________________________________________________________________________..
+void allcalos::Print(const std::string &what) const
+{
+  std::cout << "allcalos::Print(const std::string &what) const Printing info for " << what << std::endl;
+}
